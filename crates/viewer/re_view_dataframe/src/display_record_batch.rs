@@ -10,6 +10,7 @@ use arrow::{
     buffer::ScalarBuffer as ArrowScalarBuffer,
     datatypes::DataType as ArrowDataType,
 };
+use std::sync::Arc;
 use thiserror::Error;
 
 use re_arrow_util::ArrowArrayDowncastRef as _;
@@ -18,7 +19,7 @@ use re_dataframe::external::re_chunk::{TimeColumn, TimeColumnError};
 use re_log_types::external::re_tuid::Tuid;
 use re_log_types::{EntityPath, TimeInt, Timeline};
 use re_sorbet::{ColumnDescriptorRef, ComponentColumnDescriptor};
-use re_types_core::{ComponentName, DeserializationError, Loggable as _};
+use re_types_core::{ComponentName, DeserializationError, Loggable as _, RowId};
 use re_ui::UiExt as _;
 use re_viewer_context::{UiLayout, ViewerContext};
 
@@ -123,6 +124,7 @@ impl ComponentData {
         latest_at_query: &LatestAtQuery,
         entity_path: &EntityPath,
         component_name: ComponentName,
+        row_ids: Option<&[Tuid]>,
         row_index: usize,
         instance_index: Option<u64>,
     ) {
@@ -151,17 +153,21 @@ impl ComponentData {
                 data
             };
 
+            let mut row_id = row_ids
+                .and_then(|row_ids| row_ids.get(row_index).map(|&tuid| RowId::from_tuid(tuid)));
+
             // TODO(ab): somehow address this hack.
+            //
+            // Generate a content-based "fake" row id if we don't have one already.
             //
             // Background: the `row_id` passed to `ui_raw` is only ever used as a cache key for
             // images, and we must provide one for images to be displayed. Since in general we don't
             // have a row id available (e.g. for an arbitrary table entry, or for a dataframe query
             // result), we just hash the data to get a deterministic row id.
-            let row_id = (component_name.as_str() == "rerun.components.Blob")
-                .then(|| {
-                    re_tracing::profile_scope!("Blob hash");
+            if row_id.is_none() && (component_name.as_str() == "rerun.components.Blob") {
+                re_tracing::profile_scope!("Blob hash");
 
-                    let blob = re_types::components::Blob::from_arrow(&data_to_display).ok()?;
+                if let Ok(blob) = re_types::components::Blob::from_arrow(&data_to_display) {
                     let blob = &blob[0];
 
                     fn hash_u8_arrays(data1: &[u8], data2: &[u8]) -> u128 {
@@ -184,12 +190,12 @@ impl ComponentData {
                     let buffer = blob.as_slice();
                     let half_len = (buffer.len() / 2).min(MAX_SLICE_SIZE);
 
-                    Some(re_chunk_store::RowId::from_u128(hash_u8_arrays(
+                    row_id = Some(re_chunk_store::RowId::from_u128(hash_u8_arrays(
                         &buffer[..half_len],
                         &buffer[buffer.len().saturating_sub(half_len)..],
-                    )))
-                })
-                .flatten();
+                    )));
+                }
+            }
 
             ctx.component_ui_registry().ui_raw(
                 ctx,
@@ -212,7 +218,7 @@ impl ComponentData {
 #[derive(Debug)]
 pub enum DisplayColumn {
     RowId {
-        row_ids: Vec<Tuid>,
+        row_ids: Arc<Vec<Tuid>>,
     },
     Timeline {
         timeline: Timeline,
@@ -223,6 +229,9 @@ pub enum DisplayColumn {
         entity_path: EntityPath,
         component_name: ComponentName,
         component_data: ComponentData,
+
+        // if available, used to pass a row id to the component UI (e.g. to cache image)
+        row_ids: Option<Arc<Vec<Tuid>>>,
     },
 }
 
@@ -233,7 +242,7 @@ impl DisplayColumn {
     ) -> Result<Self, DisplayRecordBatchError> {
         match column_descriptor {
             ColumnDescriptorRef::RowId(_desc) => Ok(Self::RowId {
-                row_ids: Tuid::from_arrow(column_data)?,
+                row_ids: Arc::new(Tuid::from_arrow(column_data)?),
             }),
 
             ColumnDescriptorRef::Time(desc) => {
@@ -255,6 +264,7 @@ impl DisplayColumn {
                 entity_path: desc.entity_path.clone(),
                 component_name: desc.component_name,
                 component_data: ComponentData::try_new(desc, column_data)?,
+                row_ids: None,
             }),
         }
     }
@@ -332,6 +342,7 @@ impl DisplayColumn {
                 entity_path,
                 component_name,
                 component_data,
+                row_ids,
             } => {
                 component_data.data_ui(
                     ctx,
@@ -339,6 +350,7 @@ impl DisplayColumn {
                     latest_at_query,
                     entity_path,
                     *component_name,
+                    row_ids.as_deref().map(|row_ids| row_ids.as_slice()),
                     row_index,
                     instance_index,
                 );
@@ -375,19 +387,39 @@ impl DisplayRecordBatch {
         data: impl Iterator<Item = (ColumnDescriptorRef<'a>, ArrowArrayRef)>,
     ) -> Result<Self, DisplayRecordBatchError> {
         let mut num_rows = None;
+        let mut batch_row_ids = None;
 
-        let columns: Result<Vec<_>, _> = data
+        let mut columns = data
             .map(|(column_descriptor, column_data)| {
                 if num_rows.is_none() {
                     num_rows = Some(column_data.len());
                 }
-                DisplayColumn::try_new(&column_descriptor, &column_data)
+
+                let column = DisplayColumn::try_new(&column_descriptor, &column_data);
+
+                // find the batch row ids, if any
+                if batch_row_ids.is_none() {
+                    if let Ok(DisplayColumn::RowId { row_ids }) = &column {
+                        batch_row_ids = Some(Arc::clone(row_ids));
+                    }
+                }
+
+                column
             })
-            .collect();
+            .collect::<Result<Vec<DisplayColumn>, _>>()?;
+
+        // If we have row_ids, give a reference to all component columns.
+        if let Some(batch_row_ids) = batch_row_ids {
+            for column in &mut columns {
+                if let DisplayColumn::Component { row_ids, .. } = column {
+                    *row_ids = Some(Arc::clone(&batch_row_ids));
+                }
+            }
+        }
 
         Ok(Self {
             num_rows: num_rows.unwrap_or(0),
-            columns: columns?,
+            columns,
         })
     }
 
