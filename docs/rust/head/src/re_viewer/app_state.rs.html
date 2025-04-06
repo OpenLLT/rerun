@@ -983,19 +983,7 @@
 <a href="#982" id="982">982</a>
 <a href="#983" id="983">983</a>
 <a href="#984" id="984">984</a>
-<a href="#985" id="985">985</a>
-<a href="#986" id="986">986</a>
-<a href="#987" id="987">987</a>
-<a href="#988" id="988">988</a>
-<a href="#989" id="989">989</a>
-<a href="#990" id="990">990</a>
-<a href="#991" id="991">991</a>
-<a href="#992" id="992">992</a>
-<a href="#993" id="993">993</a>
-<a href="#994" id="994">994</a>
-<a href="#995" id="995">995</a>
-<a href="#996" id="996">996</a>
-<a href="#997" id="997">997</a></pre></div><pre class="rust"><code><span class="kw">use </span>ahash::HashMap;
+<a href="#985" id="985">985</a></pre></div><pre class="rust"><code><span class="kw">use </span>ahash::HashMap;
 <span class="kw">use </span>egui::{text_selection::LabelSelectionState, NumExt <span class="kw">as _</span>};
 
 <span class="kw">use </span>re_chunk::TimelineName;
@@ -1687,7 +1675,7 @@
         }
 
         <span class="comment">// This must run after any ui code, or other code that tells egui to open an url:
-        </span>check_for_clicked_hyperlinks(<span class="kw-2">&amp;</span>ctx, redap_servers);
+        </span>check_for_clicked_hyperlinks(<span class="kw-2">&amp;</span>ctx);
 
         <span class="comment">// Deselect on ESC. Must happen after all other UI code to let them capture ESC if needed.
         </span><span class="kw">if </span>ui.input(|i| i.key_pressed(egui::Key::Escape)) &amp;&amp; !is_any_popup_open {
@@ -1874,7 +1862,7 @@
 /// Must run after any ui code, or other code that tells egui to open an url.
 ///
 /// See [`re_ui::UiExt::re_hyperlink`] for displaying hyperlinks in the UI.
-</span><span class="kw">fn </span>check_for_clicked_hyperlinks(ctx: <span class="kw-2">&amp;</span>ViewerContext&lt;<span class="lifetime">'_</span>&gt;, redap_servers: <span class="kw-2">&amp;</span>RedapServers) {
+</span><span class="kw">fn </span>check_for_clicked_hyperlinks(ctx: <span class="kw-2">&amp;</span>ViewerContext&lt;<span class="lifetime">'_</span>&gt;) {
     <span class="kw">let </span>recording_scheme = <span class="string">"recording://"</span>;
 
     <span class="kw">let </span><span class="kw-2">mut </span>recording_path = <span class="prelude-val">None</span>;
@@ -1885,7 +1873,7 @@
             <span class="kw">if let </span>egui::OutputCommand::OpenUrl(open_url) = command {
                 <span class="kw">let </span>redap_uri = open_url.url.parse::&lt;re_uri::RedapUri&gt;();
 
-                <span class="kw">if let </span><span class="prelude-val">Ok</span>(redap_uri) = redap_uri {
+                <span class="kw">if </span>redap_uri.is_ok() {
                     <span class="kw">let </span>data_source = re_data_source::DataSource::from_uri(
                         re_log_types::FileSource::Uri,
                         open_url.url.clone(),
@@ -1907,18 +1895,6 @@
                             time_range,
                         }),
                     });
-
-                    <span class="comment">// If this is a dataset url, we add the server if we don't know about it already.
-                    // Otherwise we end up in a situation where we have a data from an unknown server,
-                    // which is unnecessary and can get us into a strange ui state.
-                    </span><span class="kw">if let </span>re_uri::RedapUri::DatasetData(dataset_endpoint) = redap_uri {
-                        <span class="kw">if </span>!redap_servers.has_server(<span class="kw-2">&amp;</span>dataset_endpoint.origin) {
-                            ctx.command_sender()
-                                .send_system(SystemCommand::AddRedapServer {
-                                    endpoint: re_uri::CatalogEndpoint::new(dataset_endpoint.origin),
-                                });
-                        }
-                    }
 
                     <span class="kw">match </span>data_source.stream(on_cmd, <span class="prelude-val">None</span>) {
                         <span class="prelude-val">Ok</span>(re_data_source::StreamSource::LogMessages(rx)) =&gt; {

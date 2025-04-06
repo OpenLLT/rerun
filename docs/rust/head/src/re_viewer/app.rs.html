@@ -2498,7 +2498,20 @@
 <a href="#2497" id="2497">2497</a>
 <a href="#2498" id="2498">2498</a>
 <a href="#2499" id="2499">2499</a>
-<a href="#2500" id="2500">2500</a></pre></div><pre class="rust"><code><span class="kw">use </span>std::sync::Arc;
+<a href="#2500" id="2500">2500</a>
+<a href="#2501" id="2501">2501</a>
+<a href="#2502" id="2502">2502</a>
+<a href="#2503" id="2503">2503</a>
+<a href="#2504" id="2504">2504</a>
+<a href="#2505" id="2505">2505</a>
+<a href="#2506" id="2506">2506</a>
+<a href="#2507" id="2507">2507</a>
+<a href="#2508" id="2508">2508</a>
+<a href="#2509" id="2509">2509</a>
+<a href="#2510" id="2510">2510</a>
+<a href="#2511" id="2511">2511</a>
+<a href="#2512" id="2512">2512</a>
+<a href="#2513" id="2513">2513</a></pre></div><pre class="rust"><code><span class="kw">use </span>std::sync::Arc;
 
 <span class="kw">use </span>itertools::Itertools <span class="kw">as _</span>;
 
@@ -2964,6 +2977,19 @@
         <span class="comment">// Make sure we wake up when a message is sent.
         </span><span class="attr">#[cfg(not(target_arch = <span class="string">"wasm32"</span>))]
         </span><span class="kw">let </span>rx = <span class="kw">crate</span>::wake_up_ui_thread_on_each_msg(rx, <span class="self">self</span>.egui_ctx.clone());
+
+        <span class="comment">// Add unknown redap servers.
+        //
+        // Otherwise we end up in a situation where we have a data from an unknown server,
+        // which is unnecessary and can get us into a strange ui state.
+        </span><span class="kw">if let </span>SmartChannelSource::RedapGrpcStream(endpoint) = rx.source() {
+            <span class="kw">if </span>!<span class="self">self</span>.state.redap_servers.has_server(<span class="kw-2">&amp;</span>endpoint.origin) {
+                <span class="self">self</span>.command_sender
+                    .send_system(SystemCommand::AddRedapServer {
+                        endpoint: re_uri::CatalogEndpoint::new(endpoint.origin.clone()),
+                    });
+            }
+        }
 
         <span class="self">self</span>.rx.add(rx);
     }

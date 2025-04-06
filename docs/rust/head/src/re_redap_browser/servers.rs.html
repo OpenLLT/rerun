@@ -257,7 +257,9 @@
 <a href="#256" id="256">256</a>
 <a href="#257" id="257">257</a>
 <a href="#258" id="258">258</a>
-<a href="#259" id="259">259</a></pre></div><pre class="rust"><code><span class="kw">use </span>std::collections::BTreeMap;
+<a href="#259" id="259">259</a>
+<a href="#260" id="260">260</a>
+<a href="#261" id="261">261</a></pre></div><pre class="rust"><code><span class="kw">use </span>std::collections::BTreeMap;
 <span class="kw">use </span>std::sync::mpsc::{Receiver, Sender};
 
 <span class="kw">use </span>re_log_types::EntryId;
@@ -444,8 +446,10 @@
                         Server::new(runtime, egui_ctx, origin.clone()),
                     );
                 } <span class="kw">else </span>{
-                    <span class="macro">re_log::warn!</span>(
-                        <span class="string">"Tried to add pre-existing sever at {:?}"</span>,
+                    <span class="comment">// Since we persist the server list on disk this happens quite often.
+                    // E.g. run `pixi run rerun "rerun+http://localhost:51234"` more than once.
+                    </span><span class="macro">re_log::debug!</span>(
+                        <span class="string">"Tried to add pre-existing server at {:?}"</span>,
                         origin.to_string()
                     );
                 }
